@@ -3,8 +3,10 @@ import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
 /**
- * Global middleware: protects all /api/* routes except public ones.
- * Enforces authentication via NextAuth JWT token.
+ * Global middleware:
+ * 1. Redirects www → non-www and HTTP → HTTPS in production
+ * 2. Protects all /api/* routes except public ones
+ * 3. Enforces authentication via NextAuth JWT token
  */
 
 const PUBLIC_ROUTES = [
@@ -45,8 +47,26 @@ const checkRateLimit = (key: string, config: { max: number; windowMs: number }):
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const hostname = req.headers.get("host") || "";
+  const proto = req.headers.get("x-forwarded-proto") || "https";
 
-  // Only protect /api/* routes
+  // --- 1. Redirect www → non-www (permanent) ---
+  if (hostname.startsWith("www.")) {
+    const nonWwwHost = hostname.replace(/^www\./, "");
+    const url = new URL(req.url);
+    url.host = nonWwwHost;
+    url.protocol = "https:";
+    return NextResponse.redirect(url, 301);
+  }
+
+  // --- 2. Redirect HTTP → HTTPS in production ---
+  if (proto === "http" && process.env.NODE_ENV === "production") {
+    const url = new URL(req.url);
+    url.protocol = "https:";
+    return NextResponse.redirect(url, 301);
+  }
+
+  // --- 3. Protect /api/* routes ---
   if (!pathname.startsWith("/api")) {
     return NextResponse.next();
   }
@@ -108,5 +128,8 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/:path*"],
+  matcher: [
+    // Match all paths except static files and images
+    "/((?!_next/static|_next/image|favicon.ico|images/).*)",
+  ],
 };
